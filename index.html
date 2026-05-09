@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>⚡ Lightning Tracker — Miia & Caelan</title>
+    <title>⚡ Ukkostutka — Miia & Caelan</title>
     
     <!-- Leaflet CSS -->
     <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
@@ -24,7 +24,6 @@
             flex-direction: column;
         }
         
-        /* Header */
         .header {
             background: #1e293b;
             padding: 16px 20px;
@@ -42,23 +41,18 @@
             gap: 12px;
         }
         
-        .header-title .icon {
-            font-size: 32px;
+        .header-title .icon { font-size: 32px; }
+        .header-title h1 { font-size: 20px; font-weight: bold; }
+        .header-title p { font-size: 12px; color: #94a3b8; }
+        
+        .header-actions {
+            display: flex;
+            gap: 10px;
+            align-items: center;
+            flex-wrap: wrap;
         }
         
-        .header-title h1 {
-            font-size: 20px;
-            font-weight: bold;
-        }
-        
-        .header-title p {
-            font-size: 12px;
-            color: #94a3b8;
-        }
-        
-        .btn-refresh {
-            background: #f59e0b;
-            color: #000;
+        .btn {
             border: none;
             padding: 10px 20px;
             border-radius: 8px;
@@ -71,17 +65,32 @@
             transition: all 0.2s;
         }
         
-        .btn-refresh:hover {
-            background: #d97706;
+        .btn-refresh {
+            background: #f59e0b;
+            color: #000;
         }
         
+        .btn-refresh:hover { background: #d97706; }
         .btn-refresh:disabled {
             background: #475569;
             color: #94a3b8;
             cursor: not-allowed;
         }
         
-        /* Controls */
+        .btn-notify {
+            background: #334155;
+            color: white;
+            font-size: 13px;
+            padding: 8px 14px;
+        }
+        
+        .btn-notify:hover { background: #475569; }
+        
+        .btn-notify.subscribed {
+            background: #166534;
+            color: #bbf7d0;
+        }
+
         .controls {
             background: #1e293b;
             padding: 12px 20px;
@@ -92,10 +101,7 @@
             flex-wrap: wrap;
         }
         
-        .controls label {
-            font-size: 13px;
-            color: #94a3b8;
-        }
+        .controls label { font-size: 13px; color: #94a3b8; }
         
         .controls select {
             background: #334155;
@@ -113,7 +119,6 @@
             color: #94a3b8;
         }
         
-        /* Map container */
         .map-container {
             flex: 1;
             position: relative;
@@ -126,7 +131,6 @@
             z-index: 1;
         }
         
-        /* Status overlay */
         .status-overlay {
             position: absolute;
             top: 16px;
@@ -168,12 +172,8 @@
             margin-bottom: 8px;
         }
         
-        .status-time {
-            font-size: 11px;
-            color: #64748b;
-        }
+        .status-time { font-size: 11px; color: #64748b; }
         
-        /* Error message */
         .error-message {
             position: absolute;
             bottom: 16px;
@@ -186,7 +186,6 @@
             display: none;
         }
         
-        /* Footer */
         .footer {
             background: #1e293b;
             padding: 12px;
@@ -196,13 +195,11 @@
             color: #64748b;
         }
         
-        /* Animations */
         @keyframes pulse {
             0%, 100% { opacity: 1; }
             50% { opacity: 0.5; }
         }
         
-        /* Loading state */
         .loading-overlay {
             position: absolute;
             inset: 0;
@@ -213,14 +210,9 @@
             z-index: 999;
         }
         
-        .loading-overlay.hidden {
-            display: none;
-        }
+        .loading-overlay.hidden { display: none; }
         
-        .loading-text {
-            text-align: center;
-        }
-        
+        .loading-text { text-align: center; }
         .loading-text .spinner {
             font-size: 40px;
             margin-bottom: 12px;
@@ -229,21 +221,24 @@
     </style>
 </head>
 <body>
-    <!-- Header -->
     <div class="header">
         <div class="header-title">
             <span class="icon">⚡</span>
             <div>
-                <h1>Lightning Tracker</h1>
+                <h1>Ukkostutka</h1>
                 <p>FMI Open Data • Live</p>
             </div>
         </div>
-        <button class="btn-refresh" id="refreshBtn" onclick="fetchLightningData()">
-            🔄 Refresh
-        </button>
+        <div class="header-actions">
+            <button class="btn btn-notify" id="notifyBtn" onclick="toggleNotifications()">
+                🔔 Hälytykset pois
+            </button>
+            <button class="btn btn-refresh" id="refreshBtn" onclick="fetchLightningData()">
+                🔄 Refresh
+            </button>
+        </div>
     </div>
     
-    <!-- Controls -->
     <div class="controls">
         <div>
             <label>Alert radius: </label>
@@ -257,28 +252,25 @@
         </div>
         <div class="legend">
             <span>🔵 Oulu</span>
-            <span>⚡ Within radius</span>
-            <span>🔸 Outside radius</span>
+            <span>⚡ Säteen sisällä</span>
+            <span>🔸 Säteen ulkopuolella</span>
         </div>
     </div>
     
-    <!-- Map -->
     <div class="map-container">
         <div id="map"></div>
         
-        <!-- Loading overlay -->
         <div class="loading-overlay" id="loadingOverlay">
             <div class="loading-text">
                 <div class="spinner">🗺️</div>
-                <p>Loading map...</p>
+                <p>Ladataan karttaa...</p>
             </div>
         </div>
         
-        <!-- Status overlay -->
         <div class="status-overlay">
             <div class="status-row">
                 <div class="status-dot" id="statusDot"></div>
-                <span id="statusText">Loading...</span>
+                <span id="statusText">Ladataan...</span>
             </div>
             <div class="status-warning" id="warningBox" style="display: none;">
                 ⚠️ <span id="warningText"></span>
@@ -286,51 +278,120 @@
             <div class="status-time" id="updateTime"></div>
         </div>
         
-        <!-- Error message -->
         <div class="error-message" id="errorMessage"></div>
     </div>
     
-    <!-- Footer -->
     <div class="footer">
         Data: Finnish Meteorological Institute (FMI) Open Data | Map: © OpenStreetMap contributors | 
         Miia & Caelan ⚡🖤
     </div>
     
-    <!-- Leaflet JS -->
     <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
     
     <script>
-        // === KONFIGURAATIO ===
-        
-        // 🔥 SINUN WORKER-URL 🔥
         const WORKER_URL = 'https://fmi-lightning.demondes.workers.dev';
-        
-        // Oulu coordinates
         const OULU_LAT = 65.0121;
         const OULU_LON = 25.4651;
         
-        // === GLOBAALIT MUUTTUJAT ===
         let map = null;
         let radiusCircle = null;
         let lightningMarkers = [];
         let currentRadius = 200;
+        let swRegistration = null;
+
+        // === SERVICE WORKER & NOTIFIKAATIOT ===
+
+        async function initServiceWorker() {
+            if (!('serviceWorker' in navigator) || !('PushManager' in window)) {
+                document.getElementById('notifyBtn').style.display = 'none';
+                return;
+            }
+
+            try {
+                swRegistration = await navigator.serviceWorker.register('/sw.js');
+                const existing = await swRegistration.pushManager.getSubscription();
+                if (existing) {
+                    updateNotifyButton(true);
+                } else {
+                    updateNotifyButton(false);
+                }
+            } catch (e) {
+                console.error('SW rekisteröinti epäonnistui:', e);
+            }
+        }
+
+        async function toggleNotifications() {
+            if (!swRegistration) return;
+
+            const existing = await swRegistration.pushManager.getSubscription();
+
+            if (existing) {
+                // Poistetaan subscriptio
+                await existing.unsubscribe();
+                updateNotifyButton(false);
+                return;
+            }
+
+            // Pyydetään lupa
+            const permission = await Notification.requestPermission();
+            if (permission !== 'granted') {
+                alert('Ilmoituslupa evätty. Salli ilmoitukset selaimen asetuksista.');
+                return;
+            }
+
+            // Haetaan VAPID public key Workerilta
+            const keyRes = await fetch(WORKER_URL + '/vapid-public-key');
+            const { publicKey } = await keyRes.json();
+
+            // Subscribataan
+            const subscription = await swRegistration.pushManager.subscribe({
+                userVisibleOnly: true,
+                applicationServerKey: urlBase64ToUint8Array(publicKey)
+            });
+
+            // Lähetetään subscription Workerille
+            await fetch(WORKER_URL + '/subscribe', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(subscription)
+            });
+
+            updateNotifyButton(true);
+        }
+
+        function updateNotifyButton(subscribed) {
+            const btn = document.getElementById('notifyBtn');
+            if (subscribed) {
+                btn.textContent = '🔔 Hälytykset päällä';
+                btn.classList.add('subscribed');
+            } else {
+                btn.textContent = '🔕 Hälytykset pois';
+                btn.classList.remove('subscribed');
+            }
+        }
+
+        function urlBase64ToUint8Array(base64String) {
+            const padding = '='.repeat((4 - base64String.length % 4) % 4);
+            const base64 = (base64String + padding).replace(/-/g, '+').replace(/_/g, '/');
+            const rawData = atob(base64);
+            return Uint8Array.from([...rawData].map(c => c.charCodeAt(0)));
+        }
+
+        // === KARTTA ===
         
-        // === ALUSTUS ===
         document.addEventListener('DOMContentLoaded', function() {
             initMap();
+            initServiceWorker();
         });
         
         function initMap() {
-            // Luo kartta
             map = L.map('map').setView([OULU_LAT, OULU_LON], 6);
             
-            // Lisää OpenStreetMap taso
             L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
                 attribution: '© OpenStreetMap',
                 maxZoom: 18
             }).addTo(map);
             
-            // Oulu markkeri
             const ouluIcon = L.divIcon({
                 className: 'oulu-marker',
                 html: '<div style="background: #3b82f6; width: 20px; height: 20px; border-radius: 50%; border: 3px solid white; box-shadow: 0 2px 6px rgba(0,0,0,0.4);"></div>',
@@ -340,9 +401,8 @@
             
             L.marker([OULU_LAT, OULU_LON], { icon: ouluIcon })
                 .addTo(map)
-                .bindPopup('<strong>🏠 Oulu</strong><br/>Home base');
+                .bindPopup('<strong>🏠 Oulu</strong><br/>Kotipiste');
             
-            // Sädeympyrä
             radiusCircle = L.circle([OULU_LAT, OULU_LON], {
                 radius: currentRadius * 1000,
                 color: '#f59e0b',
@@ -352,47 +412,33 @@
                 dashArray: '8, 12'
             }).addTo(map);
             
-            // Piilota loading
             document.getElementById('loadingOverlay').classList.add('hidden');
-            
-            // Hae data
             fetchLightningData();
         }
         
-        // === DATAN HAKU ===
+        // === DATA ===
+
         async function fetchLightningData() {
             const btn = document.getElementById('refreshBtn');
             btn.disabled = true;
-            btn.textContent = '⏳ Fetching...';
-            
+            btn.textContent = '⏳ Haetaan...';
             hideError();
             
             try {
                 const response = await fetch(WORKER_URL);
-                
-                if (!response.ok) {
-                    throw new Error('HTTP ' + response.status);
-                }
-                
+                if (!response.ok) throw new Error('HTTP ' + response.status);
                 const data = await response.json();
-                
-                if (data.error) {
-                    throw new Error(data.error);
-                }
-                
+                if (data.error) throw new Error(data.error);
                 updateStatus(data);
                 updateMarkers(data.strikes || []);
-                
             } catch (err) {
-                showError('Error: ' + err.message);
-                console.error('Fetch error:', err);
+                showError('Virhe: ' + err.message);
             } finally {
                 btn.disabled = false;
                 btn.textContent = '🔄 Refresh';
             }
         }
         
-        // === UI PÄIVITYKSET ===
         function updateStatus(data) {
             const dot = document.getElementById('statusDot');
             const text = document.getElementById('statusText');
@@ -403,39 +449,34 @@
             const total = data.totalStrikes || 0;
             const inRadius = (data.strikes || []).filter(s => s.distanceFromOulu <= currentRadius).length;
             
-            // Status teksti
             if (total === 0) {
-                text.textContent = 'No lightning detected';
+                text.textContent = 'Ei salamoita';
                 dot.classList.remove('active');
             } else {
-                text.textContent = total + ' strikes detected';
+                text.textContent = total + ' salamaa havaittu';
                 dot.classList.add('active');
             }
             
-            // Varoitus jos säteellä
             if (inRadius > 0) {
                 warningBox.style.display = 'block';
-                warningText.textContent = inRadius + ' strikes within radius!';
+                warningText.textContent = inRadius + ' salamaa säteen sisällä!';
             } else {
                 warningBox.style.display = 'none';
             }
             
-            // Päivitysaika
-            time.textContent = 'Updated: ' + new Date().toLocaleTimeString('fi-FI');
+            time.textContent = 'Päivitetty: ' + new Date().toLocaleTimeString('fi-FI');
         }
         
         function updateMarkers(strikes) {
-            // Poista vanhat markerit
             lightningMarkers.forEach(m => map.removeLayer(m));
             lightningMarkers = [];
             
-            // Lisää uudet
             strikes.forEach(strike => {
                 const isInRadius = strike.distanceFromOulu <= currentRadius;
                 
                 const icon = L.divIcon({
                     className: 'lightning-marker',
-                    html: '<div style="font-size: 28px; filter: drop-shadow(0 2px 3px rgba(0,0,0,0.5));' + 
+                    html: '<div style="font-size: 28px; filter: drop-shadow(0 2px 3px rgba(0,0,0,0.5));' +
                           (isInRadius ? ' animation: pulse 1s infinite;' : '') + '">' +
                           (isInRadius ? '⚡' : '🔸') + '</div>',
                     iconSize: [28, 28],
@@ -446,12 +487,12 @@
                     .addTo(map)
                     .bindPopup(
                         '<div style="font-family: system-ui; min-width: 150px;">' +
-                        '<strong>⚡ Strike</strong>' +
+                        '<strong>⚡ Salama</strong>' +
                         '<hr style="margin: 6px 0; border: none; border-top: 1px solid #ddd;"/>' +
-                        '<b>Distance:</b> ' + strike.distanceFromOulu + ' km<br/>' +
-                        (strike.peakCurrent ? '<b>Peak current:</b> ' + strike.peakCurrent + ' kA<br/>' : '') +
-                        (strike.timestamp ? '<b>Time:</b> ' + new Date(strike.timestamp).toLocaleTimeString('fi-FI') + '<br/>' : '') +
-                        (strike.cloudIndicator !== undefined ? '<b>Type:</b> ' + (strike.cloudIndicator === 1 ? 'Cloud-to-cloud ☁️' : 'Cloud-to-ground ⚡') : '') +
+                        '<b>Etäisyys:</b> ' + strike.distanceFromOulu + ' km<br/>' +
+                        (strike.peakCurrent ? '<b>Huippuvirta:</b> ' + strike.peakCurrent + ' kA<br/>' : '') +
+                        (strike.timestamp ? '<b>Aika:</b> ' + new Date(strike.timestamp).toLocaleTimeString('fi-FI') + '<br/>' : '') +
+                        (strike.cloudIndicator !== undefined ? '<b>Tyyppi:</b> ' + (strike.cloudIndicator === 1 ? 'Pilvisalama ☁️' : 'Maasalama ⚡') : '') +
                         '</div>'
                     );
                 
@@ -461,12 +502,7 @@
         
         function updateRadius() {
             currentRadius = parseInt(document.getElementById('radiusSelect').value);
-            
-            if (radiusCircle) {
-                radiusCircle.setRadius(currentRadius * 1000);
-            }
-            
-            // Päivitä markerien värit
+            if (radiusCircle) radiusCircle.setRadius(currentRadius * 1000);
             fetchLightningData();
         }
         
