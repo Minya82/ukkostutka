@@ -1,0 +1,484 @@
+<!DOCTYPE html>
+<html lang="fi">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>⚡ Lightning Tracker — Miia & Caelan</title>
+    
+    <!-- Leaflet CSS -->
+    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+    
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+        
+        body {
+            font-family: system-ui, -apple-system, 'Segoe UI', sans-serif;
+            background: #0f172a;
+            color: white;
+            min-height: 100vh;
+            display: flex;
+            flex-direction: column;
+        }
+        
+        /* Header */
+        .header {
+            background: #1e293b;
+            padding: 16px 20px;
+            border-bottom: 1px solid #334155;
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            flex-wrap: wrap;
+            gap: 12px;
+        }
+        
+        .header-title {
+            display: flex;
+            align-items: center;
+            gap: 12px;
+        }
+        
+        .header-title .icon {
+            font-size: 32px;
+        }
+        
+        .header-title h1 {
+            font-size: 20px;
+            font-weight: bold;
+        }
+        
+        .header-title p {
+            font-size: 12px;
+            color: #94a3b8;
+        }
+        
+        .btn-refresh {
+            background: #f59e0b;
+            color: #000;
+            border: none;
+            padding: 10px 20px;
+            border-radius: 8px;
+            font-weight: 600;
+            cursor: pointer;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            font-size: 14px;
+            transition: all 0.2s;
+        }
+        
+        .btn-refresh:hover {
+            background: #d97706;
+        }
+        
+        .btn-refresh:disabled {
+            background: #475569;
+            color: #94a3b8;
+            cursor: not-allowed;
+        }
+        
+        /* Controls */
+        .controls {
+            background: #1e293b;
+            padding: 12px 20px;
+            border-bottom: 1px solid #334155;
+            display: flex;
+            align-items: center;
+            gap: 20px;
+            flex-wrap: wrap;
+        }
+        
+        .controls label {
+            font-size: 13px;
+            color: #94a3b8;
+        }
+        
+        .controls select {
+            background: #334155;
+            color: white;
+            border: 1px solid #475569;
+            border-radius: 6px;
+            padding: 6px 12px;
+            font-size: 13px;
+        }
+        
+        .legend {
+            display: flex;
+            gap: 16px;
+            font-size: 13px;
+            color: #94a3b8;
+        }
+        
+        /* Map container */
+        .map-container {
+            flex: 1;
+            position: relative;
+            min-height: 400px;
+        }
+        
+        #map {
+            position: absolute;
+            inset: 0;
+            z-index: 1;
+        }
+        
+        /* Status overlay */
+        .status-overlay {
+            position: absolute;
+            top: 16px;
+            right: 16px;
+            background: rgba(30, 41, 59, 0.95);
+            backdrop-filter: blur(8px);
+            border-radius: 12px;
+            padding: 16px;
+            box-shadow: 0 4px 20px rgba(0,0,0,0.3);
+            z-index: 1000;
+            min-width: 180px;
+        }
+        
+        .status-row {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            margin-bottom: 8px;
+        }
+        
+        .status-dot {
+            width: 10px;
+            height: 10px;
+            border-radius: 50%;
+            background: #22c55e;
+        }
+        
+        .status-dot.active {
+            background: #f59e0b;
+            animation: pulse 2s infinite;
+        }
+        
+        .status-warning {
+            color: #fbbf24;
+            font-weight: 600;
+            padding: 8px;
+            background: rgba(251, 191, 36, 0.1);
+            border-radius: 6px;
+            margin-bottom: 8px;
+        }
+        
+        .status-time {
+            font-size: 11px;
+            color: #64748b;
+        }
+        
+        /* Error message */
+        .error-message {
+            position: absolute;
+            bottom: 16px;
+            left: 16px;
+            right: 16px;
+            background: rgba(239, 68, 68, 0.95);
+            border-radius: 8px;
+            padding: 12px 16px;
+            z-index: 1000;
+            display: none;
+        }
+        
+        /* Footer */
+        .footer {
+            background: #1e293b;
+            padding: 12px;
+            border-top: 1px solid #334155;
+            text-align: center;
+            font-size: 11px;
+            color: #64748b;
+        }
+        
+        /* Animations */
+        @keyframes pulse {
+            0%, 100% { opacity: 1; }
+            50% { opacity: 0.5; }
+        }
+        
+        /* Loading state */
+        .loading-overlay {
+            position: absolute;
+            inset: 0;
+            background: rgba(15, 23, 42, 0.8);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            z-index: 999;
+        }
+        
+        .loading-overlay.hidden {
+            display: none;
+        }
+        
+        .loading-text {
+            text-align: center;
+        }
+        
+        .loading-text .spinner {
+            font-size: 40px;
+            margin-bottom: 12px;
+            animation: pulse 1s infinite;
+        }
+    </style>
+</head>
+<body>
+    <!-- Header -->
+    <div class="header">
+        <div class="header-title">
+            <span class="icon">⚡</span>
+            <div>
+                <h1>Lightning Tracker</h1>
+                <p>FMI Open Data • Live</p>
+            </div>
+        </div>
+        <button class="btn-refresh" id="refreshBtn" onclick="fetchLightningData()">
+            🔄 Refresh
+        </button>
+    </div>
+    
+    <!-- Controls -->
+    <div class="controls">
+        <div>
+            <label>Alert radius: </label>
+            <select id="radiusSelect" onchange="updateRadius()">
+                <option value="50">50 km</option>
+                <option value="100">100 km</option>
+                <option value="150">150 km</option>
+                <option value="200" selected>200 km</option>
+                <option value="300">300 km</option>
+            </select>
+        </div>
+        <div class="legend">
+            <span>🔵 Oulu</span>
+            <span>⚡ Säteellä</span>
+            <span>🔸 Ulkopuolella</span>
+        </div>
+    </div>
+    
+    <!-- Map -->
+    <div class="map-container">
+        <div id="map"></div>
+        
+        <!-- Loading overlay -->
+        <div class="loading-overlay" id="loadingOverlay">
+            <div class="loading-text">
+                <div class="spinner">🗺️</div>
+                <p>Loading map...</p>
+            </div>
+        </div>
+        
+        <!-- Status overlay -->
+        <div class="status-overlay">
+            <div class="status-row">
+                <div class="status-dot" id="statusDot"></div>
+                <span id="statusText">Ladataan...</span>
+            </div>
+            <div class="status-warning" id="warningBox" style="display: none;">
+                ⚠️ <span id="warningText"></span>
+            </div>
+            <div class="status-time" id="updateTime"></div>
+        </div>
+        
+        <!-- Error message -->
+        <div class="error-message" id="errorMessage"></div>
+    </div>
+    
+    <!-- Footer -->
+    <div class="footer">
+        Data: Finnish Meteorological Institute (FMI) Open Data | Map: © OpenStreetMap contributors | 
+        Miia & Caelan ⚡🖤
+    </div>
+    
+    <!-- Leaflet JS -->
+    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+    
+    <script>
+        // === KONFIGURAATIO ===
+        
+        // 🔥 SINUN WORKER-URL 🔥
+        const WORKER_URL = 'https://fmi-lightning.demondes.workers.dev';
+        
+        // Oulu coordinates
+        const OULU_LAT = 65.0121;
+        const OULU_LON = 25.4651;
+        
+        // === GLOBAALIT MUUTTUJAT ===
+        let map = null;
+        let radiusCircle = null;
+        let lightningMarkers = [];
+        let currentRadius = 200;
+        
+        // === ALUSTUS ===
+        document.addEventListener('DOMContentLoaded', function() {
+            initMap();
+        });
+        
+        function initMap() {
+            // Luo kartta
+            map = L.map('map').setView([OULU_LAT, OULU_LON], 6);
+            
+            // Lisää OpenStreetMap taso
+            L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+                attribution: '© OpenStreetMap',
+                maxZoom: 18
+            }).addTo(map);
+            
+            // Oulu markkeri
+            const ouluIcon = L.divIcon({
+                className: 'oulu-marker',
+                html: '<div style="background: #3b82f6; width: 20px; height: 20px; border-radius: 50%; border: 3px solid white; box-shadow: 0 2px 6px rgba(0,0,0,0.4);"></div>',
+                iconSize: [20, 20],
+                iconAnchor: [10, 10]
+            });
+            
+            L.marker([OULU_LAT, OULU_LON], { icon: ouluIcon })
+                .addTo(map)
+                .bindPopup('<strong>🏠 Oulu</strong><br/>Home base');
+            
+            // Sädeympyrä
+            radiusCircle = L.circle([OULU_LAT, OULU_LON], {
+                radius: currentRadius * 1000,
+                color: '#f59e0b',
+                fillColor: '#fbbf24',
+                fillOpacity: 0.08,
+                weight: 2,
+                dashArray: '8, 12'
+            }).addTo(map);
+            
+            // Piilota loading
+            document.getElementById('loadingOverlay').classList.add('hidden');
+            
+            // Hae data
+            fetchLightningData();
+        }
+        
+        // === DATAN HAKU ===
+        async function fetchLightningData() {
+            const btn = document.getElementById('refreshBtn');
+            btn.disabled = true;
+            btn.textContent = '⏳ Fetching...';
+            
+            hideError();
+            
+            try {
+                const response = await fetch(WORKER_URL);
+                
+                if (!response.ok) {
+                    throw new Error('HTTP ' + response.status);
+                }
+                
+                const data = await response.json();
+                
+                if (data.error) {
+                    throw new Error(data.error);
+                }
+                
+                updateStatus(data);
+                updateMarkers(data.strikes || []);
+                
+            } catch (err) {
+                showError('Error: ' + err.message);
+                console.error('Fetch error:', err);
+            } finally {
+                btn.disabled = false;
+                btn.textContent = '🔄 Refresh';
+            }
+        }
+        
+        // === UI PÄIVITYKSET ===
+        function updateStatus(data) {
+            const dot = document.getElementById('statusDot');
+            const text = document.getElementById('statusText');
+            const time = document.getElementById('updateTime');
+            const warningBox = document.getElementById('warningBox');
+            const warningText = document.getElementById('warningText');
+            
+            const total = data.totalStrikes || 0;
+            const inRadius = (data.strikes || []).filter(s => s.distanceFromOulu <= currentRadius).length;
+            
+            // Status teksti
+            if (total === 0) {
+                text.textContent = 'No lightning detected';
+                dot.classList.remove('active');
+            } else {
+                text.textContent = total + ' strikes detected';
+                dot.classList.add('active');
+            }
+            
+            // Varoitus jos säteellä
+            if (inRadius > 0) {
+                warningBox.style.display = 'block';
+                warningText.textContent = inRadius + ' strikes within radius!';
+            } else {
+                warningBox.style.display = 'none';
+            }
+            
+            // Päivitysaika
+            time.textContent = 'Updated: ' + new Date().toLocaleTimeString('fi-FI');
+        }
+        
+        function updateMarkers(strikes) {
+            // Poista vanhat markerit
+            lightningMarkers.forEach(m => map.removeLayer(m));
+            lightningMarkers = [];
+            
+            // Lisää uudet
+            strikes.forEach(strike => {
+                const isInRadius = strike.distanceFromOulu <= currentRadius;
+                
+                const icon = L.divIcon({
+                    className: 'lightning-marker',
+                    html: '<div style="font-size: 28px; filter: drop-shadow(0 2px 3px rgba(0,0,0,0.5));' + 
+                          (isInRadius ? ' animation: pulse 1s infinite;' : '') + '">' +
+                          (isInRadius ? '⚡' : '🔸') + '</div>',
+                    iconSize: [28, 28],
+                    iconAnchor: [14, 14]
+                });
+                
+                const marker = L.marker([strike.lat, strike.lon], { icon: icon })
+                    .addTo(map)
+                    .bindPopup(
+                        '<div style="font-family: system-ui; min-width: 150px;">' +
+                        '<strong>⚡ Strike</strong>' +
+                        '<hr style="margin: 6px 0; border: none; border-top: 1px solid #ddd;"/>' +
+                        '<b>Distance:</b> ' + strike.distanceFromOulu + ' km<br/>' +
+                        (strike.peakCurrent ? '<b>Peak current:</b> ' + strike.peakCurrent + ' kA<br/>' : '') +
+                        (strike.timestamp ? '<b>Time:</b> ' + new Date(strike.timestamp).toLocaleTimeString('fi-FI') + '<br/>' : '') +
+                        (strike.cloudIndicator !== undefined ? '<b>Type:</b> ' + (strike.cloudIndicator === 1 ? 'Cloud-to-cloud ☁️' : 'Cloud-to-ground ⚡') : '') +
+                        '</div>'
+                    );
+                
+                lightningMarkers.push(marker);
+            });
+        }
+        
+        function updateRadius() {
+            currentRadius = parseInt(document.getElementById('radiusSelect').value);
+            
+            if (radiusCircle) {
+                radiusCircle.setRadius(currentRadius * 1000);
+            }
+            
+            // Päivitä markerien värit
+            fetchLightningData();
+        }
+        
+        function showError(message) {
+            const el = document.getElementById('errorMessage');
+            el.textContent = message;
+            el.style.display = 'block';
+        }
+        
+        function hideError() {
+            document.getElementById('errorMessage').style.display = 'none';
+        }
+    </script>
+</body>
+</html>
