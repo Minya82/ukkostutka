@@ -532,10 +532,19 @@
     const btn = document.getElementById('simulateBtn');
     btn.disabled = true;
 
-    // Lasketaan alas 30 sekuntia — sitten push lähtee
+    // Näytetään fake-iskut kartalla HETI
+    const now = Date.now();
+    const fakeStrikes = [
+        { lat: 64.5, lon: 25.8, distanceFromOulu: 58, peakCurrent: -42, timestamp: new Date(now - 180000).toISOString() },
+        { lat: 64.2, lon: 26.1, distanceFromOulu: 91, peakCurrent: 31,  timestamp: new Date(now - 90000).toISOString() },
+        { lat: 63.9, lon: 24.9, distanceFromOulu: 125, peakCurrent: -67, timestamp: new Date(now - 30000).toISOString() },
+    ];
+    updateMarkers(fakeStrikes);
+    updateStatus({ totalStrikes: fakeStrikes.length, strikes: fakeStrikes });
+
+    // Lasketaan alas — sulje sovellus nyt!
     let countdown = 30;
     btn.textContent = `⏳ ${countdown}s — sulje sovellus!`;
-
     const timer = setInterval(() => {
         countdown--;
         if (countdown > 0) {
@@ -548,11 +557,9 @@
 
     await new Promise(r => setTimeout(r, 30000));
 
+    // Nyt lähetetään push Workerille
     try {
-        const response = await fetch(WORKER_URL + '/simulate', { method: 'POST' });
-        const data = await response.json();
-        updateMarkers(data.strikes || []);
-        updateStatus({ totalStrikes: data.strikes.length, strikes: data.strikes });
+        await fetch(WORKER_URL + '/simulate', { method: 'POST' });
         btn.textContent = '✅ Lähetetty!';
     } catch (e) {
         showError('Simulointivirhe: ' + e.message);
