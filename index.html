@@ -91,6 +91,15 @@
             color: #bbf7d0;
         }
 
+        .btn-simulate {
+            background: #7c3aed;
+            color: white;
+            font-size: 13px;
+            padding: 8px 14px;
+        }
+        .btn-simulate:hover { background: #6d28d9; }
+        .btn-simulate:disabled { background: #475569; color: #94a3b8; cursor: not-allowed; }
+
         .controls {
             background: #1e293b;
             padding: 12px 20px;
@@ -232,6 +241,9 @@
         <div class="header-actions">
             <button class="btn btn-notify" id="notifyBtn" onclick="toggleNotifications()">
                 🔔 Hälytykset pois
+            </button>
+            <button class="btn btn-simulate" id="simulateBtn" onclick="runSimulation()">
+                ⛈️ Simuloi
             </button>
             <button class="btn btn-refresh" id="refreshBtn" onclick="fetchLightningData()">
                 🔄 Refresh
@@ -515,6 +527,28 @@
         function hideError() {
             document.getElementById('errorMessage').style.display = 'none';
         }
+
+        async function runSimulation() {
+            const btn = document.getElementById('simulateBtn');
+            btn.disabled = true;
+            btn.textContent = '⏳ 30s...';
+
+        try {
+            const response = await fetch(WORKER_URL + '/simulate?delay=30', { method: 'POST' });
+            const data = await response.json();
+            updateMarkers(data.strikes || []);
+            updateStatus({ totalStrikes: data.strikes.length, strikes: data.strikes });
+            btn.textContent = '✅ Suljetaan?';
+            setTimeout(() => {
+                btn.disabled = false;
+                btn.textContent = '⛈️ Simuloi';
+        }, 35000);
+        } catch (e) {
+            showError('Simulointivirhe: ' + e.message);
+            btn.disabled = false;
+            btn.textContent = '⛈️ Simuloi';
+        }
+    }
     </script>
 </body>
 </html>
