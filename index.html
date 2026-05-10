@@ -529,26 +529,40 @@
         }
 
         async function runSimulation() {
-            const btn = document.getElementById('simulateBtn');
-            btn.disabled = true;
-            btn.textContent = '⏳ 30s...';
+    const btn = document.getElementById('simulateBtn');
+    btn.disabled = true;
 
-        try {
-            const response = await fetch(WORKER_URL + '/simulate?delay=30', { method: 'POST' });
-            const data = await response.json();
-            updateMarkers(data.strikes || []);
-            updateStatus({ totalStrikes: data.strikes.length, strikes: data.strikes });
-            btn.textContent = '✅ Suljetaan?';
-            setTimeout(() => {
-                btn.disabled = false;
-                btn.textContent = '⛈️ Simuloi';
-        }, 35000);
-        } catch (e) {
-            showError('Simulointivirhe: ' + e.message);
+    // Lasketaan alas 30 sekuntia — sitten push lähtee
+    let countdown = 30;
+    btn.textContent = `⏳ ${countdown}s — sulje sovellus!`;
+
+    const timer = setInterval(() => {
+        countdown--;
+        if (countdown > 0) {
+            btn.textContent = `⏳ ${countdown}s — sulje sovellus!`;
+        } else {
+            clearInterval(timer);
+            btn.textContent = '📡 Lähetetään...';
+        }
+    }, 1000);
+
+    await new Promise(r => setTimeout(r, 30000));
+
+    try {
+        const response = await fetch(WORKER_URL + '/simulate', { method: 'POST' });
+        const data = await response.json();
+        updateMarkers(data.strikes || []);
+        updateStatus({ totalStrikes: data.strikes.length, strikes: data.strikes });
+        btn.textContent = '✅ Lähetetty!';
+    } catch (e) {
+        showError('Simulointivirhe: ' + e.message);
+    } finally {
+        setTimeout(() => {
             btn.disabled = false;
             btn.textContent = '⛈️ Simuloi';
-        }
+        }, 3000);
     }
+}
     </script>
 </body>
 </html>
