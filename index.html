@@ -305,7 +305,7 @@
     </div>
     
     <div class="footer">
-        Data: Finnish Meteorological Institute (FMI) Open Data | Map: © OpenStreetMap contributors | 
+        Data: Finnish Meteorological Institute (FMI) Open Data | Map: © OpenStreetMap & CARTO | 
         Miia & Caelan ⚡🖤
     </div>
     
@@ -434,9 +434,11 @@
             // Yksi jaettu canvas-piirtopinta kaikille ympyrämarkkereille (suorituskyky)
             canvasRenderer = L.canvas({ padding: 0.5 });
             
-            L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
-                attribution: '© OpenStreetMap',
-                maxZoom: 18
+            // Tumma tausta saa salamavärit hehkumaan (CARTO dark matter, ei API-avainta)
+            L.tileLayer('https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png', {
+                attribution: '© OpenStreetMap, © CARTO',
+                subdomains: 'abcd',
+                maxZoom: 19
             }).addTo(map);
             
             const ouluIcon = L.divIcon({
