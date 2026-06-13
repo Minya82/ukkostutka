@@ -242,7 +242,8 @@
             <button class="btn btn-notify" id="notifyBtn" onclick="toggleNotifications()">
                 🔔 Hälytykset pois
             </button>
-            <button class="btn btn-simulate" id="simulateBtn" onclick="runSimulation()">
+            <!-- Simuloi piilotettu (visibility) — palauta poistamalla style-attribuutti -->
+            <button class="btn btn-simulate" id="simulateBtn" onclick="runSimulation()" style="visibility: hidden;">
                 ⛈️ Simuloi
             </button>
             <button class="btn btn-refresh" id="refreshBtn" onclick="fetchLightningData()">
@@ -264,8 +265,18 @@
         </div>
         <div class="legend">
             <span>🔵 Oulu</span>
-            <span>⚡ Säteen sisällä</span>
-            <span>🔸 Säteen ulkopuolella</span>
+            <span>⚡ Tuore (sisällä)</span>
+            <span>🔸 Tuore (ulkona)</span>
+            <span style="display:inline-flex;align-items:center;gap:5px;">
+                Ikä:
+                <i style="width:10px;height:10px;border-radius:50%;background:#ffffff;display:inline-block;"></i>
+                <i style="width:9px;height:9px;border-radius:50%;background:#ffe600;display:inline-block;"></i>
+                <i style="width:8px;height:8px;border-radius:50%;background:#ff9a00;display:inline-block;"></i>
+                <i style="width:7px;height:7px;border-radius:50%;background:#ff2d00;display:inline-block;"></i>
+                <i style="width:6px;height:6px;border-radius:50%;background:#b30000;display:inline-block;"></i>
+                <i style="width:6px;height:6px;border-radius:50%;background:#7a0000;opacity:0.5;display:inline-block;"></i>
+                <span style="font-size:11px;color:#64748b;">3 h</span>
+            </span>
         </div>
     </div>
     
@@ -304,12 +315,33 @@
         const WORKER_URL = 'https://fmi-lightning.demondes.workers.dev';
         const OULU_LAT = 65.0121;
         const OULU_LON = 25.4651;
-        
+
+        // Markkerit: ≤ FRESH_MINUTES = hymiö, vanhemmat = canvas-ympyrä ikäskaalalla
+        const FRESH_MINUTES = 10;
+        const HISTORY_MINUTES = 180; // 3 h
+
         let map = null;
+        let canvasRenderer = null;
         let radiusCircle = null;
         let lightningMarkers = [];
         let currentRadius = 200;
         let swRegistration = null;
+
+        // Blitzortung-tyylinen ikäväritys: tuorein valkoinen → fade
+        function ageColor(ageMin) {
+            if (ageMin <= 20)  return '#ffffff';
+            if (ageMin <= 40)  return '#ffe600';
+            if (ageMin <= 70)  return '#ff9a00';
+            if (ageMin <= 110) return '#ff2d00';
+            if (ageMin <= 150) return '#b30000';
+            return '#7a0000';
+        }
+        // Liukuva 0–1 nuoresta (FRESH) vanhaan (HISTORY)
+        function ageT(ageMin) {
+            return Math.min(1, Math.max(0, (ageMin - FRESH_MINUTES) / (HISTORY_MINUTES - FRESH_MINUTES)));
+        }
+        function ageOpacity(ageMin) { return 1 - ageT(ageMin) * 0.6; } // 1.0 → 0.4
+        function ageRadius(ageMin)  { return 5 - ageT(ageMin) * 2.5; }  // 5px → 2.5px
 
         // === SERVICE WORKER & NOTIFIKAATIOT ===
 
@@ -397,7 +429,10 @@
         });
         
         function initMap() {
-            map = L.map('map').setView([OULU_LAT, OULU_LON], 6);
+            map = L.map('map', { preferCanvas: true }).setView([OULU_LAT, OULU_LON], 6);
+
+            // Yksi jaettu canvas-piirtopinta kaikille ympyrämarkkereille (suorituskyky)
+            canvasRenderer = L.canvas({ padding: 0.5 });
             
             L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
                 attribution: '© OpenStreetMap',
@@ -482,32 +517,51 @@
         function updateMarkers(strikes) {
             lightningMarkers.forEach(m => map.removeLayer(m));
             lightningMarkers = [];
-            
+
+            const now = Date.now();
+
             strikes.forEach(strike => {
+                const ts = strike.timestamp ? new Date(strike.timestamp).getTime() : now;
+                const ageMin = (now - ts) / 60000;
                 const isInRadius = strike.distanceFromOulu <= currentRadius;
-                
-                const icon = L.divIcon({
-                    className: 'lightning-marker',
-                    html: '<div style="font-size: 28px; filter: drop-shadow(0 2px 3px rgba(0,0,0,0.5));' +
-                          (isInRadius ? ' animation: pulse 1s infinite;' : '') + '">' +
-                          (isInRadius ? '⚡' : '🔸') + '</div>',
-                    iconSize: [28, 28],
-                    iconAnchor: [14, 14]
-                });
-                
-                const marker = L.marker([strike.lat, strike.lon], { icon: icon })
-                    .addTo(map)
-                    .bindPopup(
-                        '<div style="font-family: system-ui; min-width: 150px;">' +
-                        '<strong>⚡ Salama</strong>' +
-                        '<hr style="margin: 6px 0; border: none; border-top: 1px solid #ddd;"/>' +
-                        '<b>Etäisyys:</b> ' + strike.distanceFromOulu + ' km<br/>' +
-                        (strike.peakCurrent ? '<b>Huippuvirta:</b> ' + strike.peakCurrent + ' kA<br/>' : '') +
-                        (strike.timestamp ? '<b>Aika:</b> ' + new Date(strike.timestamp).toLocaleTimeString('fi-FI') + '<br/>' : '') +
-                        (strike.cloudIndicator !== undefined ? '<b>Tyyppi:</b> ' + (strike.cloudIndicator === 1 ? 'Pilvisalama ☁️' : 'Maasalama ⚡') : '') +
-                        '</div>'
-                    );
-                
+
+                let marker;
+
+                if (ageMin <= FRESH_MINUTES) {
+                    // TUORE → hymiö (⚡ pulssi sisällä, 🔸 ulkona)
+                    const icon = L.divIcon({
+                        className: 'lightning-marker',
+                        html: '<div style="font-size: 28px; filter: drop-shadow(0 2px 3px rgba(0,0,0,0.5));' +
+                              (isInRadius ? ' animation: pulse 1s infinite;' : '') + '">' +
+                              (isInRadius ? '⚡' : '🔸') + '</div>',
+                        iconSize: [28, 28],
+                        iconAnchor: [14, 14]
+                    });
+                    marker = L.marker([strike.lat, strike.lon], { icon: icon });
+                } else {
+                    // VANHEMPI → pieni canvas-ympyrä, väri/koko/opacity iän mukaan
+                    const color = ageColor(ageMin);
+                    marker = L.circleMarker([strike.lat, strike.lon], {
+                        renderer: canvasRenderer,
+                        radius: ageRadius(ageMin),
+                        weight: 0,
+                        fillColor: color,
+                        fillOpacity: ageOpacity(ageMin)
+                    });
+                }
+
+                marker.addTo(map).bindPopup(
+                    '<div style="font-family: system-ui; min-width: 150px;">' +
+                    '<strong>⚡ Salama</strong>' +
+                    '<hr style="margin: 6px 0; border: none; border-top: 1px solid #ddd;"/>' +
+                    '<b>Etäisyys:</b> ' + strike.distanceFromOulu + ' km<br/>' +
+                    '<b>Ikä:</b> ' + (ageMin < 1 ? '<1' : Math.round(ageMin)) + ' min<br/>' +
+                    (strike.peakCurrent ? '<b>Huippuvirta:</b> ' + strike.peakCurrent + ' kA<br/>' : '') +
+                    (strike.timestamp ? '<b>Aika:</b> ' + new Date(strike.timestamp).toLocaleTimeString('fi-FI') + '<br/>' : '') +
+                    (strike.cloudIndicator !== undefined ? '<b>Tyyppi:</b> ' + (strike.cloudIndicator === 1 ? 'Pilvisalama ☁️' : 'Maasalama ⚡') : '') +
+                    '</div>'
+                );
+
                 lightningMarkers.push(marker);
             });
         }
