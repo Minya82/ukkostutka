@@ -19,10 +19,31 @@
             font-family: system-ui, -apple-system, 'Segoe UI', sans-serif;
             background: #0f172a;
             color: white;
-            min-height: 100vh;
+            height: 100dvh;
+            overflow: hidden;
             display: flex;
             flex-direction: column;
         }
+
+        /* Kokoontaitettava yläosa — maksimoi kartta mobiilissa */
+        .chrome-toggle {
+            margin-left: auto;
+            background: #334155;
+            color: #e2e8f0;
+            border: 1px solid #475569;
+            border-radius: 8px;
+            width: 36px;
+            height: 36px;
+            font-size: 18px;
+            line-height: 1;
+            cursor: pointer;
+            transition: transform 0.2s;
+        }
+        .chrome-toggle:hover { background: #475569; }
+        body.compact .chrome-toggle { transform: rotate(180deg); }
+        body.compact .header-actions { display: none; }
+        body.compact .controls { display: none; }
+        body.compact .header { padding: 10px 20px; }
         
         .header {
             background: #1e293b;
@@ -131,7 +152,7 @@
         .map-container {
             flex: 1;
             position: relative;
-            min-height: 400px;
+            min-height: 240px;
         }
         
         #map {
@@ -237,6 +258,7 @@
                 <h1>Ukkostutka</h1>
                 <p>FMI Open Data • Live</p>
             </div>
+            <button class="chrome-toggle" id="chromeToggle" onclick="toggleChrome()" title="Pienennä / laajenna">⌃</button>
         </div>
         <div class="header-actions">
             <button class="btn btn-notify" id="notifyBtn" onclick="toggleNotifications()">
@@ -621,6 +643,12 @@
             btn.textContent = showCells ? '⛈️ Solut päällä' : '⛈️ Solut pois';
             btn.classList.toggle('subscribed', showCells);
             fetchCells();
+        }
+
+        function toggleChrome() {
+            document.body.classList.toggle('compact');
+            // Leaflet tarvitsee tiedon että karttasäiliön koko muuttui
+            setTimeout(() => { if (map) map.invalidateSize(); }, 220);
         }
         
         function updateStatus(data) {
