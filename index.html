@@ -290,8 +290,14 @@
         </div>
         <div class="legend">
             <span>🔵 Oulu</span>
-            <span>⚡ Tuore (sisällä)</span>
-            <span>🔸 Tuore (ulkona)</span>
+            <span style="display:inline-flex;align-items:center;gap:5px;">
+                <i style="width:11px;height:11px;border-radius:50%;background:#ffffff;border:1.5px solid #fbbf24;display:inline-block;"></i>
+                Tuore (sisällä)
+            </span>
+            <span style="display:inline-flex;align-items:center;gap:5px;">
+                <i style="width:9px;height:9px;border-radius:50%;background:#ffffff;border:1.5px solid #ffffff;display:inline-block;"></i>
+                Tuore (ulkona)
+            </span>
             <span style="display:inline-flex;align-items:center;gap:5px;">
                 Ikä:
                 <i style="width:10px;height:10px;border-radius:50%;background:#ffffff;display:inline-block;"></i>
@@ -345,14 +351,20 @@
         const OULU_LAT = 65.0121;
         const OULU_LON = 25.4651;
 
-        // Markkerit: ≤ FRESH_MINUTES = hymiö, vanhemmat = canvas-ympyrä ikäskaalalla
+        // Markkerit: KAIKKI salamat piirretään canvasille (ei DOM-emojeja).
+        // ≤ FRESH_MINUTES = kirkas iso piste renkaalla, vanhemmat = ikäskaala.
         const FRESH_MINUTES = 10;
         const HISTORY_MINUTES = 180; // 3 h
 
+        // Emojit vain jos salamoita on vähän — muuten selain hyytyy (3500 divIconia = 3500 DOM-elementtiä)
+        const EMOJI_MAX_STRIKES = 120;   // nosta/laske maun mukaan, 0 = emojit pois kokonaan
+        const STRIKES_INTERACTIVE = false; // false → klikkaus menee läpi soluun
+
         let map = null;
-        let canvasRenderer = null;
+        let boltRenderer = null;   // salamat (alempi canvas)
+        let cellRenderer = null;   // solut (ylempi canvas, oma pane)
+        let strikeLayer = null;    // kaikki salamat yhdessä ryhmässä
         let radiusCircle = null;
-        let lightningMarkers = [];
         let currentRadius = 200;
         let swRegistration = null;
 
@@ -479,8 +491,15 @@
         function initMap() {
             map = L.map('map', { preferCanvas: true }).setView([OULU_LAT, OULU_LON], 6);
 
-            // Yksi jaettu canvas-piirtopinta kaikille ympyrämarkkereille (suorituskyky)
-            canvasRenderer = L.canvas({ padding: 0.5 });
+            // Kaksi erillistä canvas-pintaa omissa paneissaan:
+            // salamat pohjalle, solut päälle — näin solut eivät koskaan huku salamamereen.
+            map.createPane('boltPane');
+            map.getPane('boltPane').style.zIndex = 420;
+            map.createPane('cellPane');
+            map.getPane('cellPane').style.zIndex = 450;
+
+            boltRenderer = L.canvas({ pane: 'boltPane', padding: 0.5 });
+            cellRenderer = L.canvas({ pane: 'cellPane', padding: 0.5 });
             
             // Tumma tausta saa salamavärit hehkumaan (CARTO dark matter, ei API-avainta)
             L.tileLayer('https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png', {
@@ -509,6 +528,7 @@
                 dashArray: '8, 12'
             }).addTo(map);
 
+            strikeLayer = L.layerGroup().addTo(map);
             cellLayer = L.layerGroup().addTo(map);
 
             document.getElementById('loadingOverlay').classList.add('hidden');
@@ -577,11 +597,12 @@
                     cell.track.slice(0, -1).forEach((p, i) => {
                         const t = (i + 1) / cell.track.length; // vanha → uusi
                         L.circleMarker([p.lat, p.lon], {
-                            renderer: canvasRenderer,
+                            renderer: cellRenderer,
                             radius: 2.5,
                             weight: 0,
                             fillColor: color,
-                            fillOpacity: 0.25 + t * 0.4
+                            fillOpacity: 0.25 + t * 0.4,
+                            interactive: false
                         }).addTo(cellLayer);
                     });
                 }
@@ -606,15 +627,28 @@
                     L.marker(tip, { icon: headIcon, interactive: false }).addTo(cellLayer);
                 }
 
-                // 3) Keskusmarkkeri — ontto rengas (erottuu salamoista)
+                // 3a) Tumma halo alle — irrottaa renkaan salamamerestä
+                L.circleMarker([L0.lat, L0.lon], {
+                    renderer: cellRenderer,
+                    radius: active ? 15 : 12,
+                    color: '#0f172a',
+                    weight: 3,
+                    opacity: 0.85,
+                    fillColor: '#0f172a',
+                    fillOpacity: 0.45,
+                    interactive: false
+                }).addTo(cellLayer);
+
+                // 3b) Keskusmarkkeri — ontto rengas, iso klikkikohde sormelle
                 const center = L.circleMarker([L0.lat, L0.lon], {
-                    renderer: canvasRenderer,
-                    radius: active ? 9 : 7,
+                    renderer: cellRenderer,
+                    radius: active ? 13 : 10,
                     color: color,
-                    weight: active ? 2.5 : 1.5,
+                    weight: active ? 3.5 : 2,
                     fillColor: color,
                     fillOpacity: 0.12,
-                    dashArray: active ? null : '3, 4'
+                    dashArray: active ? null : '3, 4',
+                    bubblingMouseEvents: false
                 }).addTo(cellLayer);
 
                 // 4) Klikattava infokupla
@@ -679,55 +713,78 @@
             time.textContent = 'Päivitetty: ' + new Date().toLocaleTimeString('fi-FI');
         }
         
+        // Popupin sisältö rakennetaan vasta klikattaessa, ei 3500 kertaa etukäteen
+        function strikePopupHtml(strike, ageMin) {
+            return '<div style="font-family: system-ui; min-width: 150px;">' +
+                '<strong>⚡ Salama</strong>' +
+                '<hr style="margin: 6px 0; border: none; border-top: 1px solid #ddd;"/>' +
+                '<b>Etäisyys:</b> ' + strike.distanceFromOulu + ' km<br/>' +
+                '<b>Ikä:</b> ' + (ageMin < 1 ? '<1' : Math.round(ageMin)) + ' min<br/>' +
+                (strike.peakCurrent ? '<b>Huippuvirta:</b> ' + strike.peakCurrent + ' kA<br/>' : '') +
+                (strike.timestamp ? '<b>Aika:</b> ' + new Date(strike.timestamp).toLocaleTimeString('fi-FI') + '<br/>' : '') +
+                (strike.cloudIndicator !== undefined ? '<b>Tyyppi:</b> ' + (strike.cloudIndicator === 1 ? 'Pilvisalama ☁️' : 'Maasalama ⚡') : '') +
+                '</div>';
+        }
+
         function updateMarkers(strikes) {
-            lightningMarkers.forEach(m => map.removeLayer(m));
-            lightningMarkers = [];
+            if (!strikeLayer) return;
+            strikeLayer.clearLayers();   // yksi kutsu, ei tuhatta removeLayeria
 
             const now = Date.now();
+            // Emojit vain pienellä salamamäärällä — isossa myrskyssä ne tappavat selaimen
+            const useEmoji = strikes.length <= EMOJI_MAX_STRIKES;
 
             strikes.forEach(strike => {
                 const ts = strike.timestamp ? new Date(strike.timestamp).getTime() : now;
                 const ageMin = (now - ts) / 60000;
                 const isInRadius = strike.distanceFromOulu <= currentRadius;
+                const isFresh = ageMin <= FRESH_MINUTES;
 
                 let marker;
 
-                if (ageMin <= FRESH_MINUTES) {
-                    // TUORE → hymiö (⚡ pulssi sisällä, 🔸 ulkona)
+                if (isFresh && useEmoji) {
+                    // Rauhallinen keli → saa olla hymiö
                     const icon = L.divIcon({
                         className: 'lightning-marker',
                         html: '<div style="font-size: 28px; filter: drop-shadow(0 2px 3px rgba(0,0,0,0.5));' +
                               (isInRadius ? ' animation: pulse 1s infinite;' : '') + '">' +
                               (isInRadius ? '⚡' : '🔸') + '</div>',
                         iconSize: [28, 28],
-                        iconAnchor: [14, 14]
+                        iconAnchor: [14, 14],
+                        interactive: STRIKES_INTERACTIVE
                     });
-                    marker = L.marker([strike.lat, strike.lon], { icon: icon });
+                    marker = L.marker([strike.lat, strike.lon], {
+                        icon: icon,
+                        interactive: STRIKES_INTERACTIVE
+                    });
+                } else if (isFresh) {
+                    // TUORE isossa myrskyssä → kirkas piste jolla on rengas (erottuu ilman emojia)
+                    marker = L.circleMarker([strike.lat, strike.lon], {
+                        renderer: boltRenderer,
+                        radius: isInRadius ? 5.5 : 4.5,
+                        color: isInRadius ? '#fbbf24' : '#ffffff',
+                        weight: 1.5,
+                        fillColor: '#ffffff',
+                        fillOpacity: 1,
+                        interactive: STRIKES_INTERACTIVE
+                    });
                 } else {
                     // VANHEMPI → pieni canvas-ympyrä, väri/koko/opacity iän mukaan
-                    const color = ageColor(ageMin);
                     marker = L.circleMarker([strike.lat, strike.lon], {
-                        renderer: canvasRenderer,
+                        renderer: boltRenderer,
                         radius: ageRadius(ageMin),
                         weight: 0,
-                        fillColor: color,
-                        fillOpacity: ageOpacity(ageMin)
+                        fillColor: ageColor(ageMin),
+                        fillOpacity: ageOpacity(ageMin),
+                        interactive: STRIKES_INTERACTIVE
                     });
                 }
 
-                marker.addTo(map).bindPopup(
-                    '<div style="font-family: system-ui; min-width: 150px;">' +
-                    '<strong>⚡ Salama</strong>' +
-                    '<hr style="margin: 6px 0; border: none; border-top: 1px solid #ddd;"/>' +
-                    '<b>Etäisyys:</b> ' + strike.distanceFromOulu + ' km<br/>' +
-                    '<b>Ikä:</b> ' + (ageMin < 1 ? '<1' : Math.round(ageMin)) + ' min<br/>' +
-                    (strike.peakCurrent ? '<b>Huippuvirta:</b> ' + strike.peakCurrent + ' kA<br/>' : '') +
-                    (strike.timestamp ? '<b>Aika:</b> ' + new Date(strike.timestamp).toLocaleTimeString('fi-FI') + '<br/>' : '') +
-                    (strike.cloudIndicator !== undefined ? '<b>Tyyppi:</b> ' + (strike.cloudIndicator === 1 ? 'Pilvisalama ☁️' : 'Maasalama ⚡') : '') +
-                    '</div>'
-                );
+                if (STRIKES_INTERACTIVE) {
+                    marker.bindPopup(() => strikePopupHtml(strike, ageMin));
+                }
 
-                lightningMarkers.push(marker);
+                marker.addTo(strikeLayer);
             });
         }
         
