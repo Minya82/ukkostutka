@@ -1,0 +1,10 @@
+{
+  "name": "ukkostutka",
+  "private": true,
+  "type": "module",
+  "engines": { "node": ">=18" },
+  "scripts": {
+    "save-storm": "node tools/save-storm.mjs",
+    "something-something-storm": "node tools/save-storm.mjs"
+  }
+}

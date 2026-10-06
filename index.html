@@ -230,6 +230,80 @@
             50% { opacity: 0.5; }
         }
         
+        /* === MYRSKYDEMO (replay) === */
+        #replayCanvas {
+            position: absolute;
+            inset: 0;
+            width: 100%;   /* canvas ei veny pelkällä insetillä */
+            height: 100%;
+            z-index: 2;
+            pointer-events: none;
+            display: none;
+        }
+        .map-container.replaying #replayCanvas { display: block; }
+
+        /* Hitaasti hehkuva kehys — ei vilkkumista */
+        .map-container.replaying::after {
+            content: '';
+            position: absolute;
+            inset: 0;
+            z-index: 900;
+            pointer-events: none;
+            box-shadow: inset 0 0 0 2px rgba(167, 139, 250, 0.9),
+                        inset 0 0 32px 6px rgba(124, 58, 237, 0.55);
+            animation: replayGlow 4s ease-in-out infinite alternate;
+        }
+        @keyframes replayGlow {
+            from { opacity: 0.4; }
+            to   { opacity: 1; }
+        }
+        @media (prefers-reduced-motion: reduce) {
+            .map-container.replaying::after { animation: none; opacity: 0.8; }
+        }
+
+        .replay-hud {
+            position: absolute;
+            left: 16px;
+            bottom: 24px;
+            z-index: 1000;
+            display: none;
+            align-items: center;
+            gap: 12px;
+            max-width: calc(100% - 32px);
+            background: rgba(30, 41, 59, 0.95);
+            backdrop-filter: blur(8px);
+            border: 1px solid #7c3aed;
+            border-radius: 12px;
+            padding: 10px 12px;
+            box-shadow: 0 4px 20px rgba(0,0,0,0.3);
+        }
+        .map-container.replaying .replay-hud { display: flex; }
+        .replay-badge {
+            background: #7c3aed;
+            color: white;
+            font-size: 11px;
+            font-weight: 700;
+            letter-spacing: 0.08em;
+            padding: 3px 7px;
+            border-radius: 6px;
+        }
+        .replay-info { display: flex; flex-direction: column; min-width: 0; }
+        .replay-name { font-size: 13px; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+        .replay-clock { font-size: 13px; color: #e2e8f0; font-variant-numeric: tabular-nums; }
+        .replay-count { font-size: 11px; color: #94a3b8; font-variant-numeric: tabular-nums; }
+        .replay-btn {
+            background: #334155;
+            color: white;
+            border: 1px solid #475569;
+            border-radius: 8px;
+            width: 40px;
+            height: 40px;
+            font-size: 16px;
+            cursor: pointer;
+            flex-shrink: 0;
+        }
+        .replay-btn:hover { background: #475569; }
+
         .loading-overlay {
             position: absolute;
             inset: 0;
@@ -265,8 +339,13 @@
                 🔔 Hälytykset pois
             </button>
             <!-- Simuloi piilotettu (visibility) — palauta poistamalla style-attribuutti (style="visibility: hidden;)-->
-            <button class="btn btn-simulate" id="simulateBtn" onclick="runSimulation()">
+            <button class="btn btn-simulate" id="simulateBtn" onclick="runSimulation()" style="display: none;">
                 ⛈️ Simuloi
+            </button>
+            <!-- Myrskydemo: näkyy vain jos storms/index.json löytyy (npm run something-something-storm) -->
+            <select id="stormSelect" class="btn btn-notify" style="display: none;" title="Valitse myrsky"></select>
+            <button class="btn btn-simulate" id="replayBtn" onclick="startReplay()" style="display: none;">
+                ▶ Myrskydemo
             </button>
             <button class="btn btn-notify subscribed" id="cellsBtn" onclick="toggleCells()">
                 ⛈️ Solut päällä
@@ -337,6 +416,18 @@
         </div>
         
         <div class="error-message" id="errorMessage"></div>
+
+        <canvas id="replayCanvas"></canvas>
+        <div class="replay-hud" id="replayHud">
+            <span class="replay-badge">DEMO</span>
+            <div class="replay-info">
+                <span class="replay-name" id="replayName"></span>
+                <span class="replay-clock" id="replayClock"></span>
+                <span class="replay-count" id="replayCount"></span>
+            </div>
+            <button class="replay-btn" id="replayPauseBtn" onclick="toggleReplayPause()" title="Tauko / jatka">⏸</button>
+            <button class="replay-btn" onclick="stopReplay()" title="Takaisin liveen">✕</button>
+        </div>
     </div>
     
     <div class="footer">
@@ -486,6 +577,7 @@
         document.addEventListener('DOMContentLoaded', function() {
             initMap();
             initServiceWorker();
+            loadStorms();
         });
         
         function initMap() {
@@ -802,6 +894,221 @@
         
         function hideError() {
             document.getElementById('errorMessage').style.display = 'none';
+        }
+
+        // === MYRSKYDEMO (replay) ===
+        // Tallennetut myrskyt ovat staattisia tiedostoja storms/-kansiossa
+        // (tools/save-storm.mjs). FMI:tä ei tarvita toistoon.
+        const REPLAY_SECONDS = 90;      // koko myrsky toistetaan tässä ajassa
+        const REPLAY_TRAIL_MIN = 60;    // iskut näkyvät näin kauan (myrskyn minuutteja)
+        const REPLAY_LIVE_CHECK_MS = 2 * 60000;
+        // Ikäportaat (myrskyn minuutteja) samoilla väreillä kuin livessä
+        const REPLAY_BANDS = [
+            { maxAge: 4,   color: '#ffffff', r: 3.5, a: 1 },
+            { maxAge: 10,  color: '#ffe600', r: 3.2, a: 0.95 },
+            { maxAge: 20,  color: '#ff9a00', r: 2.9, a: 0.85 },
+            { maxAge: 33,  color: '#ff2d00', r: 2.6, a: 0.75 },
+            { maxAge: 47,  color: '#b30000', r: 2.3, a: 0.6 },
+            { maxAge: REPLAY_TRAIL_MIN, color: '#7a0000', r: 2, a: 0.45 },
+        ];
+
+        let storms = [];
+        let replay = null;
+
+        function fmtStormDate(iso) {
+            return new Date(iso).toLocaleDateString('fi-FI', { timeZone: 'Europe/Helsinki' });
+        }
+
+        async function loadStorms() {
+            try {
+                const res = await fetch('storms/index.json', { cache: 'no-cache' });
+                if (!res.ok) return;
+                storms = (await res.json()).storms || [];
+            } catch (e) { return; }
+            if (!storms.length) return;
+
+            const btn = document.getElementById('replayBtn');
+            const sel = document.getElementById('stormSelect');
+            if (storms.length > 1) {
+                sel.innerHTML = storms.map(s =>
+                    '<option value="' + s.id + '">' + fmtStormDate(s.start) + ' · ' + s.name + '</option>').join('');
+                sel.style.display = '';
+                btn.textContent = '▶ Toista myrsky';
+            } else {
+                btn.textContent = '▶ Myrsky ' + fmtStormDate(storms[0].start);
+                btn.title = storms[0].name;
+            }
+            btn.style.display = '';
+        }
+
+        // Ensimmäinen indeksi jonka aika > x (t on aikajärjestyksessä)
+        function upperBound(t, x) {
+            let lo = 0, hi = t.length;
+            while (lo < hi) { const mid = (lo + hi) >> 1; if (t[mid] <= x) lo = mid + 1; else hi = mid; }
+            return lo;
+        }
+
+        async function startReplay() {
+            if (replay) return;
+            const sel = document.getElementById('stormSelect');
+            const meta = storms.length > 1 ? storms.find(s => s.id === sel.value) : storms[0];
+            if (!meta) return;
+
+            const btn = document.getElementById('replayBtn');
+            btn.disabled = true;
+            btn.textContent = '⏳ Ladataan...';
+            let storm;
+            try {
+                const res = await fetch(meta.file);
+                if (!res.ok) throw new Error('HTTP ' + res.status);
+                storm = await res.json();
+            } catch (e) {
+                showError('Myrskyn lataus epäonnistui: ' + e.message);
+                return;
+            } finally {
+                btn.disabled = false;
+                btn.textContent = storms.length > 1 ? '▶ Toista myrsky' : '▶ Myrsky ' + fmtStormDate(meta.start);
+            }
+
+            const n = storm.strikes.length;
+            const lat = new Float32Array(n), lon = new Float32Array(n), t = new Float64Array(n);
+            storm.strikes.forEach((s, i) => { lat[i] = s[0]; lon[i] = s[1]; t[i] = s[2]; });
+            const startMs = Date.parse(storm.start);
+            const dur = (Date.parse(storm.end) - startMs) / 1000;
+
+            replay = {
+                storm, lat, lon, t, startMs, dur,
+                pos: 0, speed: dur / REPLAY_SECONDS,
+                playing: true, last: null, raf: null,
+                liveTimer: setInterval(checkLiveDuringReplay, REPLAY_LIVE_CHECK_MS)
+            };
+
+            // Live pois näkyvistä demon ajaksi
+            map.removeLayer(strikeLayer);
+            map.removeLayer(cellLayer);
+            document.getElementById('warningBox').style.display = 'none';
+            document.getElementById('statusDot').classList.add('active');
+            document.getElementById('replayName').textContent = storm.name;
+            document.getElementById('replayPauseBtn').textContent = '⏸';
+            document.querySelector('.map-container').classList.add('replaying');
+            map.on('move zoom resize', drawReplay);
+
+            replay.raf = requestAnimationFrame(replayTick);
+        }
+
+        function replayTick(ts) {
+            if (!replay) return;
+            if (replay.playing) {
+                if (replay.last != null) replay.pos += (ts - replay.last) / 1000 * replay.speed;
+                replay.last = ts;
+                if (replay.pos >= replay.dur) {
+                    replay.pos = replay.dur;
+                    replay.playing = false;
+                    document.getElementById('replayPauseBtn').textContent = '↻';
+                }
+            }
+            drawReplay();
+            if (replay.playing) replay.raf = requestAnimationFrame(replayTick);
+        }
+
+        function drawReplay() {
+            if (!replay) return;
+            const canvas = document.getElementById('replayCanvas');
+            const w = canvas.clientWidth, h = canvas.clientHeight, dpr = window.devicePixelRatio || 1;
+            if (canvas.width !== Math.round(w * dpr) || canvas.height !== Math.round(h * dpr)) {
+                canvas.width = Math.round(w * dpr);
+                canvas.height = Math.round(h * dpr);
+            }
+            const ctx = canvas.getContext('2d');
+            ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+            ctx.clearRect(0, 0, w, h);
+
+            const { lat, lon, t, pos } = replay;
+            const end = upperBound(t, pos);
+
+            // Vanhin portti ensin, tuoreimmat päälle; jokainen portti on yhtenäinen aikaväli
+            for (let b = REPLAY_BANDS.length - 1; b >= 0; b--) {
+                const band = REPLAY_BANDS[b];
+                const from = upperBound(t, pos - band.maxAge * 60);
+                const to = b > 0 ? upperBound(t, pos - REPLAY_BANDS[b - 1].maxAge * 60) : end;
+                if (from >= to) continue;
+                ctx.globalAlpha = band.a;
+                ctx.fillStyle = band.color;
+                ctx.beginPath();
+                for (let i = from; i < to; i++) {
+                    const p = map.latLngToContainerPoint([lat[i], lon[i]]);
+                    if (p.x < -10 || p.y < -10 || p.x > w + 10 || p.y > h + 10) continue;
+                    ctx.moveTo(p.x + band.r, p.y);
+                    ctx.arc(p.x, p.y, band.r, 0, Math.PI * 2);
+                }
+                ctx.fill();
+            }
+
+            // Juuri iskeneet: pehmeä valkoinen hehku
+            const flashFrom = upperBound(t, pos - 1.5 * 60);
+            ctx.globalAlpha = 0.22;
+            ctx.fillStyle = '#ffffff';
+            ctx.beginPath();
+            for (let i = flashFrom; i < end; i++) {
+                const p = map.latLngToContainerPoint([lat[i], lon[i]]);
+                ctx.moveTo(p.x + 7, p.y);
+                ctx.arc(p.x, p.y, 7, 0, Math.PI * 2);
+            }
+            ctx.fill();
+            ctx.globalAlpha = 1;
+
+            updateReplayHud(end);
+        }
+
+        function updateReplayHud(shown) {
+            const d = new Date(replay.startMs + replay.pos * 1000);
+            const opts = { timeZone: 'Europe/Helsinki' };
+            const time = d.toLocaleTimeString('fi-FI', { ...opts, hour: '2-digit', minute: '2-digit' });
+            document.getElementById('replayClock').textContent =
+                d.toLocaleDateString('fi-FI', opts) + ' · ' + time + ' (replay)';
+            document.getElementById('replayCount').textContent =
+                shown + ' / ' + replay.t.length + ' salamaa';
+            document.getElementById('statusText').textContent = 'Myrskydemo — ei live';
+            document.getElementById('updateTime').textContent = 'Data: Ilmatieteen laitos';
+        }
+
+        function toggleReplayPause() {
+            if (!replay) return;
+            const btn = document.getElementById('replayPauseBtn');
+            if (replay.playing) {
+                replay.playing = false;
+                cancelAnimationFrame(replay.raf);
+                btn.textContent = '▶';
+                return;
+            }
+            if (replay.pos >= replay.dur) replay.pos = 0;   // ↻ alusta
+            replay.playing = true;
+            replay.last = null;
+            btn.textContent = '⏸';
+            replay.raf = requestAnimationFrame(replayTick);
+        }
+
+        function stopReplay() {
+            if (!replay) return;
+            cancelAnimationFrame(replay.raf);
+            clearInterval(replay.liveTimer);
+            replay = null;
+            map.off('move zoom resize', drawReplay);
+            document.querySelector('.map-container').classList.remove('replaying');
+            strikeLayer.addTo(map);
+            cellLayer.addTo(map);
+            fetchLightningData();
+        }
+
+        // Live voittaa: jos Worker on herännyt oikeaan ukkoseen, demo väistyy
+        async function checkLiveDuringReplay() {
+            try {
+                const res = await fetch(WORKER_URL + '/status');
+                if (!res.ok) return;
+                const s = await res.json();
+                const recent = s.lastStrikeAt && Date.now() - Date.parse(s.lastStrikeAt) < 20 * 60000;
+                if (s.mode === 'active' && recent) stopReplay();
+            } catch (e) { /* demo jatkuu */ }
         }
 
         async function runSimulation() {
