@@ -1,14 +1,6 @@
 {
   "storms": [
     {
-      "id": "2026-07-30",
-      "name": "testitallennus",
-      "start": "2026-07-30T18:00:00.000Z",
-      "end": "2026-07-30T19:00:00.000Z",
-      "count": 8370,
-      "file": "storms/2026-07-30.json"
-    },
-    {
       "id": "2026-07-30-2000",
       "name": "Heinäkuun rintama",
       "start": "2026-07-30T17:00:00.000Z",
