@@ -385,7 +385,7 @@
                 <i style="width:7px;height:7px;border-radius:50%;background:#ff2d00;display:inline-block;"></i>
                 <i style="width:6px;height:6px;border-radius:50%;background:#b30000;display:inline-block;"></i>
                 <i style="width:6px;height:6px;border-radius:50%;background:#7a0000;opacity:0.5;display:inline-block;"></i>
-                <span style="font-size:11px;color:#64748b;">3 h</span>
+                <span id="legendAge" style="font-size:11px;color:#64748b;">3 h</span>
             </span>
             <span style="display:inline-flex;align-items:center;gap:5px;">
                 <i style="width:11px;height:11px;border-radius:50%;border:2px solid #22d3ee;display:inline-block;"></i>
@@ -778,6 +778,7 @@
         }
         
         function updateStatus(data) {
+            if (replay) return;   // demon aikana tilaruutu kuuluu demolle
             const dot = document.getElementById('statusDot');
             const text = document.getElementById('statusText');
             const time = document.getElementById('updateTime');
@@ -901,7 +902,7 @@
         // (tools/save-storm.mjs). FMI:tä ei tarvita toistoon.
         const REPLAY_SECONDS = 90;      // koko myrsky toistetaan tässä ajassa
         const REPLAY_TRAIL_MIN = 60;    // iskut näkyvät näin kauan (myrskyn minuutteja)
-        const REPLAY_LIVE_CHECK_MS = 2 * 60000;
+        const REPLAY_LIVE_CHECK_MS = 30000;  // < REPLAY_SECONDS, muuten tarkistus ei ehdi koskaan
         // Ikäportaat (myrskyn minuutteja) samoilla väreillä kuin livessä
         const REPLAY_BANDS = [
             { maxAge: 4,   color: '#ffffff', r: 3.5, a: 1 },
@@ -941,6 +942,19 @@
             btn.style.display = '';
         }
 
+        function validateStorm(storm) {
+            if (!storm || !Array.isArray(storm.strikes) || !storm.strikes.length) return 'ei iskuja';
+            const dur = Date.parse(storm.end) - Date.parse(storm.start);
+            if (!(dur > 0)) return 'alku/loppu puuttuu tai väärin päin';
+            let prev = -Infinity;
+            for (const s of storm.strikes) {
+                if (!Array.isArray(s) || s.length < 3 || !s.every(Number.isFinite)) return 'virheellinen iskurivi';
+                if (s[2] < prev) return 'iskut eivät ole aikajärjestyksessä';
+                prev = s[2];
+            }
+            return null;
+        }
+
         // Ensimmäinen indeksi jonka aika > x (t on aikajärjestyksessä)
         function upperBound(t, x) {
             let lo = 0, hi = t.length;
@@ -970,6 +984,12 @@
                 btn.textContent = storms.length > 1 ? '▶ Toista myrsky' : '▶ Myrsky ' + fmtStormDate(meta.start);
             }
 
+            const problem = validateStorm(storm);
+            if (problem) {
+                showError('Myrskytiedosto on rikki: ' + problem);
+                return;
+            }
+
             const n = storm.strikes.length;
             const lat = new Float32Array(n), lon = new Float32Array(n), t = new Float64Array(n);
             storm.strikes.forEach((s, i) => { lat[i] = s[0]; lon[i] = s[1]; t[i] = s[2]; });
@@ -989,11 +1009,15 @@
             document.getElementById('warningBox').style.display = 'none';
             document.getElementById('statusDot').classList.add('active');
             document.getElementById('replayName').textContent = storm.name;
+            document.getElementById('statusText').textContent = 'Myrskydemo — ei live';
+            document.getElementById('updateTime').textContent = 'Data: Ilmatieteen laitos';
+            document.getElementById('legendAge').textContent = REPLAY_TRAIL_MIN + ' min (demo)';
             document.getElementById('replayPauseBtn').textContent = '⏸';
             document.querySelector('.map-container').classList.add('replaying');
             map.on('move zoom resize', drawReplay);
 
             replay.raf = requestAnimationFrame(replayTick);
+            checkLiveDuringReplay();   // heti, ei vasta ensimmäisen välin jälkeen
         }
 
         function replayTick(ts) {
@@ -1060,16 +1084,22 @@
             updateReplayHud(end);
         }
 
+        // Kellon muotoilu vain minuutin vaihtuessa, laskuri vain kun määrä muuttuu
         function updateReplayHud(shown) {
-            const d = new Date(replay.startMs + replay.pos * 1000);
-            const opts = { timeZone: 'Europe/Helsinki' };
-            const time = d.toLocaleTimeString('fi-FI', { ...opts, hour: '2-digit', minute: '2-digit' });
-            document.getElementById('replayClock').textContent =
-                d.toLocaleDateString('fi-FI', opts) + ' · ' + time + ' (replay)';
-            document.getElementById('replayCount').textContent =
-                shown + ' / ' + replay.t.length + ' salamaa';
-            document.getElementById('statusText').textContent = 'Myrskydemo — ei live';
-            document.getElementById('updateTime').textContent = 'Data: Ilmatieteen laitos';
+            const minute = Math.floor(replay.pos / 60);
+            if (minute !== replay.hudMinute) {
+                replay.hudMinute = minute;
+                const d = new Date(replay.startMs + minute * 60000);
+                const opts = { timeZone: 'Europe/Helsinki' };
+                const time = d.toLocaleTimeString('fi-FI', { ...opts, hour: '2-digit', minute: '2-digit' });
+                document.getElementById('replayClock').textContent =
+                    d.toLocaleDateString('fi-FI', opts) + ' · ' + time + ' (replay)';
+            }
+            if (shown !== replay.hudShown) {
+                replay.hudShown = shown;
+                document.getElementById('replayCount').textContent =
+                    shown + ' / ' + replay.t.length + ' salamaa';
+            }
         }
 
         function toggleReplayPause() {
@@ -1095,6 +1125,7 @@
             replay = null;
             map.off('move zoom resize', drawReplay);
             document.querySelector('.map-container').classList.remove('replaying');
+            document.getElementById('legendAge').textContent = '3 h';
             strikeLayer.addTo(map);
             cellLayer.addTo(map);
             fetchLightningData();

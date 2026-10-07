@@ -35,6 +35,8 @@ const STORMS_DIR = path.join(path.dirname(fileURLToPath(import.meta.url)), '..',
 
 // --- Aika: Suomen aika ↔ UTC ---
 
+const pad = n => String(n).padStart(2, '0');
+
 function tzOffsetMs(utcMs) {
   const parts = Object.fromEntries(new Intl.DateTimeFormat('en-US', {
     timeZone: TZ, hourCycle: 'h23',
@@ -60,6 +62,21 @@ export function localParts(date) {
   return { y: +parts.year, mo: +parts.month, d: +parts.day, h: +parts.hour, mi: +parts.minute };
 }
 
+/** Hylkää 31.2., 25:00 ja kellonsiirron puuttuvan tunnin: tuloksen pitää olla sama kuin syöte */
+function strictHelsinki(y, mo, d, h, mi, original) {
+  const norm = new Date(Date.UTC(y, mo - 1, d)); // seuraava päivä yms. normalisoituu tässä
+  const want = { y: norm.getUTCFullYear(), mo: norm.getUTCMonth() + 1, d: norm.getUTCDate(), h, mi };
+  const utc = helsinkiToUtc(y, mo, d, h, mi);
+  const got = localParts(utc);
+  if (h > 23 || mi > 59 || mo < 1 || mo > 12 ||
+      got.y !== want.y || got.mo !== want.mo || got.d !== want.d || got.h !== want.h || got.mi !== want.mi ||
+      (original && d !== want.d)) {
+    throw new Error(`"${original || `${h}:${pad(mi)}`}" ei ole olemassa oleva aika Suomessa ` +
+                    '(väärä päivä/kellonaika tai kellonsiirrossa hypätty tunti)');
+  }
+  return utc;
+}
+
 /** "2026-07-30 21:00" (Suomen aikaa), "2026-07-30T18:00Z" (UTC) tai pelkkä "02:00" (vaatii base) */
 export function parseTime(str, base = null) {
   const s = String(str).trim();
@@ -69,18 +86,16 @@ export function parseTime(str, base = null) {
     return d;
   }
   let m = s.match(/^(\d{4})-(\d{1,2})-(\d{1,2})[ T](\d{1,2})[:.](\d{2})$/);
-  if (m) return helsinkiToUtc(+m[1], +m[2], +m[3], +m[4], +m[5]);
+  if (m) return strictHelsinki(+m[1], +m[2], +m[3], +m[4], +m[5], s);
   m = s.match(/^(\d{1,2})[:.](\d{2})$/);
   if (m && base) {
     const b = localParts(base);
-    let d = helsinkiToUtc(b.y, b.mo, b.d, +m[1], +m[2]);
-    if (d <= base) d = new Date(helsinkiToUtc(b.y, b.mo, b.d + 1, +m[1], +m[2]));
-    return d;
+    const d = strictHelsinki(b.y, b.mo, b.d, +m[1], +m[2]);
+    return d > base ? d : strictHelsinki(b.y, b.mo, b.d + 1, +m[1], +m[2]);
   }
   throw new Error(`En ymmärrä aikaa "${s}" — käytä muotoa 2026-07-30 21:00`);
 }
 
-const pad = n => String(n).padStart(2, '0');
 function fmtLocal(date) {
   const p = localParts(date);
   return `${p.d}.${p.mo}.${p.y} ${pad(p.h)}:${pad(p.mi)}`;
@@ -157,11 +172,10 @@ export async function downloadStorm(start, end, { radiusKm = null, log = console
   for (const s of all) {
     if (s.time < t0 || s.time > end.getTime() / 1000) continue;
     if (radiusKm && distanceKm(OULU_LAT, OULU_LON, s.lat, s.lon) > radiusKm) continue;
-    const row = [Math.round(s.lat * 1000) / 1000, Math.round(s.lon * 1000) / 1000, Math.round(s.time - t0)];
-    const key = row.join(',');
+    const key = `${s.lat},${s.lon},${s.time}`; // alkuperäinen tarkkuus: lähekkäiset iskut eivät sulaudu
     if (seen.has(key)) continue;
     seen.add(key);
-    rows.push(row);
+    rows.push([Math.round(s.lat * 1000) / 1000, Math.round(s.lon * 1000) / 1000, Math.round(s.time - t0)]);
   }
   rows.sort((a, b) => a[2] - b[2]);
   return rows;
@@ -181,10 +195,18 @@ export function buildStorm({ id, name, start, end, strikes, radiusKm }) {
   };
 }
 
+async function readIndex() {
+  const file = path.join(STORMS_DIR, 'index.json');
+  let text;
+  try { text = await readFile(file, 'utf8'); }
+  catch (e) { if (e.code === 'ENOENT') return { storms: [] }; throw e; } // ensimmäinen myrsky
+  try { return JSON.parse(text); }
+  catch (e) { throw new Error(`storms/index.json on rikki (${e.message}) — korjaa se ensin, ettei kirjasto katoa`); }
+}
+
 async function upsertIndex(entry) {
   const file = path.join(STORMS_DIR, 'index.json');
-  let index = { storms: [] };
-  try { index = JSON.parse(await readFile(file, 'utf8')); } catch { /* ensimmäinen myrsky */ }
+  const index = await readIndex();
   index.storms = (index.storms || []).filter(s => s.id !== entry.id);
   index.storms.push(entry);
   index.storms.sort((a, b) => b.start.localeCompare(a.start)); // uusin ensin
@@ -211,6 +233,8 @@ function usage() {
   Valinnainen: --radius 400   (vain iskut 400 km säteellä Oulusta)
 
   Tulos: storms/<päivä>.json + kortti storms/index.json:iin.
+  Saman päivän toinen myrsky: storms/<päivä>-<kellonaika>.json.
+  Sama alkuaika uudelleen korvaa aiemman tallenteen.
   Sen jälkeen: git add storms && git commit -m "Myrsky" && git push
 `);
 }
@@ -220,7 +244,11 @@ async function main() {
   if (args.includes('-h') || args.includes('--help')) return usage();
   let radiusKm = null;
   const ri = args.indexOf('--radius');
-  if (ri >= 0) { radiusKm = Number(args[ri + 1]); args.splice(ri, 2); }
+  if (ri >= 0) {
+    radiusKm = Number(args[ri + 1]);
+    if (!Number.isFinite(radiusKm) || radiusKm <= 0) throw new Error(`--radius tarvitsee positiivisen luvun (km), sain "${args[ri + 1]}"`);
+    args.splice(ri, 2);
+  }
 
   let [startStr, endStr, name] = args;
   if (!startStr) {
@@ -237,11 +265,19 @@ async function main() {
   const hours = (end - start) / 3600000;
   if (hours > 24) throw new Error(`${hours.toFixed(1)} h on aika pitkä myrsky — tarkista ajat`);
   const lp = localParts(start);
-  const id = `${lp.y}-${pad(lp.mo)}-${pad(lp.d)}`;
+  // Tunnus = päivä; saman päivän TOINEN myrsky saa kellonajan perään.
+  // Sama alku uudelleen = tarkoituksellinen uudelleentallennus, korvataan.
+  let id = `${lp.y}-${pad(lp.mo)}-${pad(lp.d)}`;
+  const existing = (await readIndex()).storms || [];
+  const sameDay = existing.find(s => s.id === id);
+  if (sameDay && sameDay.start !== start.toISOString()) id += `-${pad(lp.h)}${pad(lp.mi)}`;
+  const replacing = existing.find(s => s.id === id);
   name = (name || '').trim() || `Myrsky ${lp.d}.${lp.mo}.${lp.y}`;
 
   console.log(`\n⛈️  ${name}\n   ${fmtLocal(start)} – ${fmtLocal(end)} Suomen aikaa (${hours.toFixed(1)} h)` +
               (radiusKm ? `, ${radiusKm} km Oulusta` : ', koko Pohjola') + '\n');
+
+  if (replacing) console.log(`   (korvaa aiemman tallenteen "${replacing.name}", sama alkuaika)\n`);
 
   const strikes = await downloadStorm(start, end, { radiusKm });
   if (strikes.length === 0) {
